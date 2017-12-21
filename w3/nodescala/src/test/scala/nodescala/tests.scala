@@ -11,6 +11,8 @@ import org.scalatest._
 import NodeScala._
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
+import java.util.Date
+import org.junit.rules.ExpectedException
 
 @RunWith(classOf[JUnitRunner])
 class NodeScalaSuite extends FunSuite {
@@ -30,8 +32,99 @@ class NodeScalaSuite extends FunSuite {
       case t: TimeoutException => // ok!
     }
   }
+  test("all") {
+    val list = List(Future.always(111), Future.always(112), Future.always(113))
+    val all = Future.all(list)
 
-  
+    assert(Await.result(all, 1 second) == List(111, 112, 113))
+  }
+  test("any") {
+    val list = List(Future.always(111), Future.always(112), Future.failed(new Exception))
+    val any = Future.any(list)
+
+    try {
+      Await.result(any, 1 second)
+      assert(false)
+    } catch {
+      case t: Exception => // got exception
+    }
+  }
+  test("delay") {
+    println("DELAY")
+    println(new Date)
+    val delay = Future.delay(3 second)
+    Await.result(delay, 5 seconds)
+    println(new Date)
+  }
+  test("now throws NoSuchElementException") {
+    try {
+      Future.never.now
+      assert(false)
+    } catch {
+      case t: NoSuchElementException => // ok!
+    }
+  }
+  test("now throws IllegalStateException") {
+    try {
+      Future.failed(new IllegalStateException).now
+      assert(false)
+    } catch {
+      case t: IllegalStateException => // ok!
+    }
+  }
+  test("now successful") {
+    assert(Future.successful(2).now == 2)
+  }
+  test("continuewith") {
+    val f = Future{ 1 }
+    val s = f.continueWith(_ => throw new IllegalStateException("HELLO"))
+    try {
+      Await.result(s, Duration("100 ms"))
+    } catch {
+      case t: IllegalStateException => // OK!
+    }
+  }
+  test("continue") {
+    val f = Future{ 1 }
+    val s = f.continueWith(_ => throw new IllegalStateException("FOO"))
+    try {
+      Await.result(s, Duration("100 ms"))
+    } catch {
+      case t: IllegalStateException => // OK!
+    }
+  }
+
+  test("Future should run until cancelled") {
+    val working = Future.run() { ct =>
+      Future {
+        println(ct.nonCancelled)
+        while (ct.nonCancelled) {
+          println("working")
+          Thread.sleep(1000)
+        }
+        println("done")
+      }
+    }
+    Future.delay(5 seconds) onSuccess {
+      case _ => working.unsubscribe()
+    }
+  }
+  test("CancellationTokenSource should allow stopping the computation") {
+    val cts = CancellationTokenSource()
+    val ct = cts.cancellationToken
+    val p = Promise[String]()
+
+    async {
+      while (ct.nonCancelled) {
+        // do work
+      }
+
+      p.success("done")
+    }
+
+    cts.unsubscribe()
+    assert(Await.result(p.future, 1 second) == "done")
+  }
   
   class DummyExchange(val request: Request) extends Exchange {
     @volatile var response = ""
